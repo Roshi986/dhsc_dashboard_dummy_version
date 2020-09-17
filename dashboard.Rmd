@@ -1,0 +1,323 @@
+---
+title: "England population 2019-2020"
+output: 
+  flexdashboard::flex_dashboard:
+    theme: default
+    orientation: rows
+    #logo: logo.png # Need bigger logo
+    source_code: https://github.com/andreassot10/dhsc_dashboard_dummy_version.git
+    social: 
+runtime: shiny
+---
+
+```{css, echo = FALSE}
+@import url('https://fonts.googleapis.com/css?family=Open+Sans');
+
+@font-face {
+  font-family: 'Open Sans', sans-serif;
+}
+
+div {
+  font-family: 'Open Sans', sans-serif;
+}
+
+h1, h2, h3, h4, h5, h6, .header {
+  font-family: 'Open Sans', sans-serif;
+}
+
+div.about { 
+  font-size: 1.1em;
+  font-family: 'Open Sans', sans-serif;
+  padding: 20px;
+}
+
+.navbar-logo {
+  background-color:white;
+  max-width:60px;
+  max-height:60px;
+}
+
+.navbar {
+  background-color:#00ad93;
+}
+
+.tbl {
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.bar-chart {
+  flex-grow: 1;
+  margin-left: 0px;
+  height: 14px;
+}
+
+.bar_front {
+  height: 100%;
+}
+
+.bar_back {
+  height: 100%;
+}
+
+/* Hide selection checkboxes in table */
+.rt-select-input{
+  opacity: 0;
+}
+
+/* Change map pointer to grab */
+.leaflet-interactive {
+    cursor: grab;
+}
+```
+
+```{r setup, include = FALSE}
+library(flexdashboard)
+library(shiny)
+library(htmlwidgets)
+library(httr)
+library(tidyverse)
+library(reshape2)
+library(readxl)
+library(janitor)
+library(sf)
+library(leaflet)
+library(reactable)
+
+source('prepare_data.R')
+source('reactable_styling_functions.R')
+```
+
+```{r, reactive}
+# This is a reactive element that will be used later to filter the data by the selected Local Authority
+# It is useful for zooming in and out of the map and for plotting area-specific population pyramids
+# Object zoom_to below is also associated with it
+selected <- reactive(getReactableState("indicators_table", "selected"))
+```
+
+Dashboard
+=======================================================================
+
+Row {data-height = 500}
+-----------------------------------------------------------------------
+
+###
+```{r}
+# The three character vectors below are arguments of function reactive_table_format_columns(). Vector "column_names_in_reactive_table" is where the user defines the names of the columns in the interactive table. Vector "sticky_columns" is where the user defines which columns to freeze on right-scrolling.
+column_names_in_data_frame <- table_data %>%
+  select(-area_code) %>%
+  select(area_name, all_ages, all_ages_prop, everything()) %>%
+  names
+column_names_in_reactive_table <- c("Local authority", 
+  "Population", "% England population", column_names_in_data_frame[-c(1:3)])
+sticky_columns <- c("Local authority", "Population", "% England population")
+index <- which(column_names_in_reactive_table %in% sticky_columns)
+columns_with_round_bars <- column_names_in_reactive_table[-index]
+
+fillCol(flex = c(NA, 1),
+  HTML("<p style = 'color: #757575;font-size: 1.1em;font-weight: bold;margin-left: 15px;'>Population data per Local Authority</p>"),
+  reactableOutput("indicators_table", height = "100%")
+)
+
+output$indicators_table <- renderReactable({
+  
+  reactable(select(table_data, -area_code), 
+          selection = "single", 
+          onClick = "select", 
+          highlight = FALSE, # If true, highlights (gray) row on hover. Problem is, a few sticky cols aren't highlighted (don't know why), so whole row becomes gray except those sticky cols. Don't know how to fix, so I've switched highlight off.
+          rowStyle = list(cursor = "pointer"),
+          # Next three lines enable scrolling down all the way, i.e. the table isn't split in 'pages'
+          showPageInfo = FALSE, 
+          showPageSizeOptions = FALSE, 
+          defaultPageSize = length(table_data$area_code),
+          height = "auto",
+          compact = TRUE,
+          borderless = FALSE,
+          wrap = FALSE,
+          resizable = TRUE,
+          searchable = TRUE,
+          defaultSorted = "all_ages",
+          defaultSortOrder = "desc",
+          defaultColDef = colDef(align = "left"),
+          theme = reactableTheme(
+            rowSelectedStyle = list(backgroundColor = "white"),
+            searchInputStyle = list(width = "100%")),
+          language = reactableLang(
+            searchPlaceholder = "Type in a local authority...",
+            noData = "Local authority not found"),
+          columns = 
+            reactive_table_format_columns(
+              column_names_in_data_frame, 
+              column_names_in_reactive_table, 
+              columns_with_round_bars,
+              sticky_columns,
+              align = 'left'
+            ), 
+          # The code below freezes the column headers. Currently, the column headers are two: one for the ranking indicators and one for the sub-indicators. When right-scrolling, the second header hides below the first one. However, the local authority names column that appears on the very left of the table has no header (not necessary). So, when right scrolling, the second header "hides" below the first header and then reappears above the local authority column. Some partial hard coding is required here to prevent this from happening. An empty column header is created for local authorities, so that the second header (now the third) hides below the empty header (now the first). This can be controlled with the z-index, which is the third-dimension of a HTML doc: a higher z-index places a graphic on top of a graphic with a lower z-index. Here, the z-index for the first and second headers is set to 2, and for the third header, the z-index is 1, so that it passes below them. The position at which a header freezes depends on argument "length" below. ASSUMING that each cell has a width of roughly 100, the first header freezes at position 0, the second one at the end of the first one, i.e. at 100 (= 1 column under the first header X 100) and the third one at the end of the second one, i.e. at 300 (= (1 column under the first header + 2 columns under the second header) X 100).
+          columnGroups = list(
+            colGroup(
+              name = "", 
+              columns = c("area_name"),
+              headerStyle = list(position = "sticky", left = 0, background = "#fff", 
+                borderRight = "0px", zIndex = 2)
+            ),
+            colGroup(
+              name = "Total population", 
+              columns = c("all_ages", "all_ages_prop"),
+              headerStyle = list(position = "sticky", left = 100, background = "#fff", 
+                borderRight = "0px", zIndex = 2)
+            ),
+            colGroup(
+              name = "Population per age group", 
+              columns = column_names_in_data_frame[-c(1:3)],
+              align = "left",
+              headerStyle = list(position = "sticky", left = 300, background = "#fff", 
+                borderRight = "0px", zIndex = 1)
+            )
+          )
+  )
+})
+```
+
+Row {data-height = 500}
+-----------------------------------------------------------------------
+
+###
+```{r}
+uiOutput("mapUI")
+
+output$mapUI <- renderUI({
+  if (is.null(selected())) {
+    div(HTML("Click on a local authority on the table to get a map of it")) 
+  } else {
+    fillCol(
+      flex = c(NA, 1),
+      HTML(paste0("<p style = 'color: #757575;font-size: 1.1em;font-weight: bold;margin-left: 15px;'>Indicator values in selected Local Authority</p><br/>")),
+      leafletOutput("map")
+    )
+  }
+})
+
+zoom_to <- reactive({
+  id <- table_data[selected(), ]$area_code
+    filter(sf, area_code == id)
+})
+
+output$map <- renderLeaflet({
+  # We need an if() statement here to prevent an annoying error from dplyr from popping in the map window. The error occurs when one clicks and then unclicks a local authority name on the table because, when unclicking, selected() is NULL so dplyr pushes pack when filtering sf by area_code == id above. The error is printed in the R Markdown tab in R Studio, but also appears on the map window when the user clicks again on the local authority name. The if() statement prevents the error from appearing on the map window (it'll still appear in the R Markdown tab).
+  if (!is.null(selected())) {
+    leaflet(
+      data = sf, 
+      options = leafletOptions(zoomControl = FALSE)
+    ) %>%
+    setView(
+      lng = zoom_to()$long, 
+      lat = zoom_to()$lat, 
+      zoom = 10
+    ) %>% 
+    addTiles(
+      urlTemplate = "https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png", 
+      attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a> | <a href="https://www.ons.gov.uk/methodology/geography/licences">Contains OS data © Crown copyright and database right (2020)</a>'
+    ) %>%
+    addPolygons(
+      data = sf, 
+      fillColor = ~ all_ages_colour,
+      #fillColor = gray.colors(n = length(unique(sf$transmission_score)), start         = 0.3, end = 0.9, gamma = 2.2),
+      weight = 1, 
+      color = "#bdbdbd", # Colour for polygon lines
+      opacity = 1
+    ) %>% 
+    addPolygons(
+      data = zoom_to(), 
+      fillColor = "none", 
+      weight = 1, 
+      color = "black", # Colour for polygon lines in selected area
+      opacity = 1
+    ) %>% 
+    addCircleMarkers(
+      lng = ~long, 
+      lat = ~lat, 
+      radius = ~all_ages_prop, # Passing the data into log to get smaller values 
+      fillColor = ~ifelse(is.na(all_ages_prop), "#CCC", "gray"), 
+      fillOpacity = 0.3, 
+      weight = 1, 
+      color = ~ifelse(is.na(all_ages_prop), "#CCC", "black"), 
+      opacity = 1, 
+      label = ~popup, 
+      labelOptions = 
+        labelOptions(
+          style = 
+            list(
+              "font-weight" = "normal", 
+              padding = "3px 8px"
+            ), 
+          textsize = "13px", 
+          direction = "auto")
+        ) %>% 
+      onRender("function(el, t) {var myMap = this;myMap._container.style['background'] = '#ffffff';}",
+        paste0("function(el, x) {$('head').append(","\'<meta name=\"viewport\" content=\"width=device-width,
+        initial-scale=1.0\">\'",");}")
+      )
+  }
+})
+```
+
+###
+```{r}
+uiOutput("pyramidUI")
+
+output$pyramidUI <- renderUI({
+  if (is.null(selected())) {
+    div(HTML("Click on a local authority on the table to get its population pyramid")) 
+  } else {
+    fillCol(
+      flex = c(NA, 1),
+      HTML(paste0("<p style = 'color: #757575;font-size: 1.1em;font-weight: bold;margin-left: 15px;'>Population pyramid in selected Local Authority</p><br/>")),
+      shinyApp(ui, server)
+    )
+  }
+})
+
+ui <- fluidPage(
+  plotOutput('table')
+)
+
+server <- function(input, output, session) {
+  output$table <- renderPlot({
+    ons_pop %>%
+      filter(area_code == zoom_to()$area_code) %>%
+      ggplot(aes(x = age, y = ifelse(gender == 'male', prop, -prop), 
+        fill = gender)) +
+      geom_bar(stat = "identity") +
+      scale_fill_manual(values = c('#8b2346', '#ecac00')) +
+      #scale_y_continuous(labels = abs, limits = max(ons_pop$prop) * c(-1,1)) +
+      coord_flip() +
+      labs(x = "Age", y = "Percent of local authority population") + 
+      theme_bw() + 
+      theme(
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank()
+      )
+  })
+}
+```
+
+About {data-icon="fa-info-circle"}
+=======================================================================
+
+### 
+
+**How to use**
+
+**Data sources**
+
+- Map: [Counties and Unitary Authorities (December 2019) Boundaries UK BUC](https://geoportal.statistics.gov.uk/datasets/counties-and-unitary-authorities-december-2019-boundaries-uk-buc/data), Office for National Statistics.
+- Population pyramid: [Mid-2019: April 2020 local authority district codes](https://www.ons.gov.uk/peoplepopulationandcommunity/populationandmigration/populationestimates/datasets/populationestimatesforukenglandandwalesscotlandandnorthernireland), Office for National Statistics.
+
+**References**
+
+- The code for building this dashboard benefited from open-source code and ideas that we tailored to our own needs, in particular from:
+  1. [Trafford Data Lab's Covid-19 project](https://github.com/traffordDataLab/covid-19.git). 
+  2. [Travelling Tabby's UK Coronavirus Tracker](https://www.travellingtabby.com/uk-coronavirus-tracker/).
+  3. [Kyle Cuilla's 2019 NFL Team Ratings](https://kcuilla.netlify.app/post/2019-nfl-team-ratings/).
+- **Any other refs?**
