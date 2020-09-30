@@ -21,6 +21,7 @@ if ("ltla.geojson" %in% list.files()) {
         case_when(
           area_name == "Cornwall and Isles of Scilly" ~ "E06000052",
           area_name == "Hackney and City of London" ~ "E09000012",
+          area_code == "E10000002" ~ "E06000060", # https://data.gov.uk/dataset/7f1e8c5a-7e8c-4b88-bec2-d070b8b7bdf7/local-authority-district-to-county-april-2020-lookup-in-england
           TRUE ~ area_code
         ),
       long = 
@@ -164,7 +165,8 @@ sf <- sf %>%
   select(all_ages) %>%
   distinct %>%
   arrange_all %>%
-  mutate(all_ages_colour = c(pal(nrow(.) - 1), "#808080")) %>%
+  #mutate(all_ages_colour = c(pal(nrow(.) - 1), "#808080")) %>%
+  mutate(all_ages_colour = pal(nrow(.))) %>%
   right_join(sf, by = 'all_ages') %>%
   select(3:ncol(.), all_ages_colour, all_ages) %>%
   relocate(all_ages_prop, .after = last_col()) %>%
